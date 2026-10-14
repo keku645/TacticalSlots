@@ -1,0 +1,23 @@
+{
+  "Name": "TacticalSlots",
+  "Authors": [
+    "keku"
+  ],
+  "Description": "Choose the knife slot weapon (machete, knife, ACB-90) and the grenade (M67, M18 smoke). The machete and the smoke's game pieces ride bundles of references to the player's own game data; the M18's hand meshes and the canister's collision ship inside the mod.",
+  "URL": "none",
+  "Version": "0.0.2",
+  "HasWebUI": false,
+  "HasVeniceEXT": true,
+  "Tags": [
+    "tacticalslots"
+  ],
+  "Superbundles": [
+    "Win32/tacticalslots/machete",
+    "Win32/tacticalslots/smoke",
+    "Win32/tacticalslotsui/ui",
+    "Win32/tacticalslotsui/chunks"
+  ],
+  "Dependencies": {
+    "veniceext": "^1.0.0"
+  }
+}
