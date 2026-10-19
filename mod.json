@@ -1,11 +1,11 @@
 {
   "Name": "TacticalSlots",
   "Authors": [
-    "keku"
+    "keku645"
   ],
-  "Description": "Choose the knife slot weapon (machete, knife, ACB-90) and the grenade (M67, M18 smoke). The machete and the smoke's game pieces ride bundles of references to the player's own game data; the M18's hand meshes and the canister's collision ship inside the mod.",
-  "URL": "none",
-  "Version": "0.0.2",
+  "Description": "Choose the knife slot weapon (machete, knife, ACB-90) and the grenade (M67, M18 smoke, M84 flashbang); the M136 AT4 among the engineer's launchers; the M82A3, with its accessories, among the recon's rifles. The machete's, the smoke's, the flashbang's, the M136's and the M82A3's game pieces ride bundles of references to the player's own game data; the M18's and the M84's hand meshes, the canister's collision, the smoke volume's box and shader and the M82A3's third person mesh ship inside the mod.",
+  "URL": "https://github.com/keku645/TacticalSlots",
+  "Version": "0.0.3",
   "HasWebUI": false,
   "HasVeniceEXT": true,
   "Tags": [
@@ -14,6 +14,10 @@
   "Superbundles": [
     "Win32/tacticalslots/machete",
     "Win32/tacticalslots/smoke",
+    "Win32/tacticalslots/volume",
+    "Win32/tacticalslots/flash",
+    "Win32/tacticalslots/m136",
+    "Win32/tacticalslots/m82a3",
     "Win32/tacticalslotsui/ui",
     "Win32/tacticalslotsui/chunks"
   ],

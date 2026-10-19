@@ -10,12 +10,12 @@
 -- THE KNIFE SLOT. Every kit's weapon table has a knife part listing [ACB-90, knife]. When a player deploys, his client sends the
 -- FIRST eligible knife of that list (measured: the deploy code asks for index 0, no profile, no menu). So the choice is the
 -- order of that list on the player's own client. The machete is added to the list in both realms: the server checks what the
--- client sends against its own copy (measured 2026-10-14: it takes the machete).
+-- client sends against its own copy (it takes the machete).
 --
 -- THE CHOICE. The deploy screen's knife slot (the UI build merged into this mod: ext/Shared/TacticalSlotsShared.lua mounts its
 -- bundle, ext/Client/KnifeTab.lua hears its picks) calls TACTICALSLOTS_KNIFE_CHOOSE. The choice is put first in every kit's list, written
 -- into the screen's mailbox (the KnifeSelSet DataSetNode's Param, which the screen pulls to show the slot), and kept by the server
--- (Admin/Mods/TacticalSlots/mod.db, table knife), which hands it back when the player's client loads a level.
+-- (the mod's mod.db, table knife), which hands it back when the player's client loads a level.
 
 -- ---- knobs ------------------------------------------------------------------------------------------------------------------
 -- The knife the game sends when the player has not chosen one: the first of the game's own list. "machete" | "razor" | "knife"
@@ -24,7 +24,7 @@ local DEFAULT_KNIFE = "razor"
 -- Levels that already carry the machete in their own bundle: ours would load a second copy of the same partitions.
 local SKIP_LEVELS = { sp_paris = true, sp_villa = true, frontend = true }
 
--- The mod's lines in the client's and the server's console (the server keeps them in mod.db either way). false = silent.
+-- The mod's diagnostic lines in the client's and the server's console. false = silent.
 local PRINTS = false
 -- -----------------------------------------------------------------------------------------------------------------------------
 
@@ -36,6 +36,37 @@ local BUNDLE = "tacticalslots/machetebundle"
 local SMOKE_SUPERBUNDLE = "tacticalslots/smoke"
 local SMOKE_BUNDLE = "tacticalslots/smokebundle"
 local SMOKE_SKIP_LEVELS = { frontend = true }
+
+-- The smoke's volume indoors (ext/Shared/SmokeGrenade.lua, VOLUME): a shader database of our own (one new shader, every level), the
+-- box it draws and the box's variation entry. Two bundles right after the smoke's, the database first: the box's material finds its
+-- shader by name as it loads. false: not loaded, and rooms fill with the streams' particles.
+local VOLUME_ENABLED = true
+local VOLUME_SUPERBUNDLE = "tacticalslots/volume"
+local VOLUME_BUNDLES = { "tacticalslots/volumedb", "tacticalslots/volumemesh" }
+
+-- The M84 flashbang's superbundle (ext/Shared/Flashbang.lua): its hand meshes and their variations, its projectile (the M67's, copied,
+-- on the campaign flashbang's collision), and the campaign flashbang's mesh, textures, sparks, smoke and bang as references. Loaded
+-- after the smoke's, the same way; every multiplayer map. false: not loaded, and the grenade slot offers no flashbang.
+local FLASH_ENABLED = true
+local FLASH_SUPERBUNDLE = "tacticalslots/flash"
+local FLASH_BUNDLE = "tacticalslots/flashbundle"
+
+-- The M136's superbundle (ext/Shared/M136.lua): references to the game's own M136 -- weapon, unlock, meshes, textures, variation,
+-- animation package, sound -- loaded after the others, the same way. Not on MP_012 (its main bundle carries the M136 itself) nor the menu.
+-- false: not loaded, and the engineer's gadget 1 list stays as the game ships it.
+local M136_ENABLED = true
+local M136_SUPERBUNDLE = "tacticalslots/m136"
+local M136_BUNDLE = "tacticalslots/m136bundle"
+local M136_SKIP_LEVELS = { frontend = true, mp_012 = true, sp_earthquake = true }
+
+-- The M82A3's superbundle (ext/Shared/M82A3.lua): references to the game's own M82A3 -- weapon, unlock, its customization and its
+-- accessories' unlocks, meshes, textures, variations, animation package, sounds, bullet, shell ejection -- loaded after the others, the
+-- same way. Not on the campaign map whose main bundle carries it (SP_Villa) nor the menu. false: not loaded, and the recon's primary
+-- weapon list stays as the game ships it.
+local M82A3_ENABLED = true
+local M82A3_SUPERBUNDLE = "tacticalslots/m82a3"
+local M82A3_BUNDLE = "tacticalslots/m82a3bundle"
+local M82A3_SKIP_LEVELS = { frontend = true, sp_villa = true }
 
 local KNIVES = {
 	machete = "Weapons/Machete/U_Machete",
@@ -62,6 +93,10 @@ local IS_CLIENT = SharedUtils:IsClientModule()
 
 local m_Active = false
 local m_SmokeActive = false
+local m_VolumeActive = false
+local m_FlashActive = false
+local m_M136Active = false
+local m_M82A3Active = false
 local m_Built = false
 local m_Chosen = DEFAULT_KNIFE      -- the client's choice (the server's copy of the lists only ever appends the machete)
 local m_KnifeParts = {}             -- this level's kits' knife lists: { part, kit name }
@@ -71,16 +106,8 @@ local m_MailNodes = {}              -- every loaded copy of the deploy screen's 
 _G.TACTICALSLOTS_PRINTS = PRINTS
 
 local function LOG(p_Text)
-	local s_Line = tostring(p_Text)
 	if PRINTS then
-		print("[TacticalSlots][" .. (IS_CLIENT and "CLI" or "SRV") .. "] " .. s_Line)
-	end
-
-	-- the server keeps its lines in the mod's database; the client hands its own to the server
-	if IS_CLIENT then
-		pcall(function() NetEvents:Send("TacticalSlots:Log", s_Line) end)
-	elseif _G.TACTICALSLOTS_NOTE ~= nil then
-		pcall(_G.TACTICALSLOTS_NOTE, "server", s_Line)
+		print("[TacticalSlots][" .. (IS_CLIENT and "CLI" or "SRV") .. "] " .. tostring(p_Text))
 	end
 end
 
@@ -104,16 +131,46 @@ end
 
 -- ---- delivery -----------------------------------------------------------------------------------------------------------------
 Events:Subscribe("Level:LoadResources", function(p_LevelName)
-	m_Active, m_SmokeActive, m_Built = false, false, false
+	m_Active, m_SmokeActive, m_VolumeActive, m_FlashActive, m_M136Active, m_M82A3Active, m_Built = false, false, false, false, false, false, false
 	_G.TACTICALSLOTS_SMOKE_MOUNTED = false
+	_G.TACTICALSLOTS_FLASH_MOUNTED = false
+	_G.TACTICALSLOTS_M136_MOUNTED = false
+	_G.TACTICALSLOTS_M82A3_MOUNTED = false
 
 	local s_Leaf = string.lower(tostring(p_LevelName):match("[^/]+$") or "")
+
+	if M136_ENABLED and not M136_SKIP_LEVELS[s_Leaf] then
+		local s_M136Ok, s_M136Err = pcall(function() ResourceManager:MountSuperBundle(M136_SUPERBUNDLE) end)
+		LOG("mount '" .. M136_SUPERBUNDLE .. "': " .. (s_M136Ok and "OK" or ("FAILED " .. tostring(s_M136Err))))
+		m_M136Active = s_M136Ok
+		_G.TACTICALSLOTS_M136_MOUNTED = s_M136Ok
+	end
+
+	if M82A3_ENABLED and not M82A3_SKIP_LEVELS[s_Leaf] then
+		local s_M82Ok, s_M82Err = pcall(function() ResourceManager:MountSuperBundle(M82A3_SUPERBUNDLE) end)
+		LOG("mount '" .. M82A3_SUPERBUNDLE .. "': " .. (s_M82Ok and "OK" or ("FAILED " .. tostring(s_M82Err))))
+		m_M82A3Active = s_M82Ok
+		_G.TACTICALSLOTS_M82A3_MOUNTED = s_M82Ok
+	end
 
 	if not SMOKE_SKIP_LEVELS[s_Leaf] then
 		local s_SmokeOk, s_SmokeErr = pcall(function() ResourceManager:MountSuperBundle(SMOKE_SUPERBUNDLE) end)
 		LOG("mount '" .. SMOKE_SUPERBUNDLE .. "': " .. (s_SmokeOk and "OK" or ("FAILED " .. tostring(s_SmokeErr))))
 		m_SmokeActive = s_SmokeOk
 		_G.TACTICALSLOTS_SMOKE_MOUNTED = s_SmokeOk
+
+		if s_SmokeOk and VOLUME_ENABLED then
+			local s_VolumeOk, s_VolumeErr = pcall(function() ResourceManager:MountSuperBundle(VOLUME_SUPERBUNDLE) end)
+			LOG("mount '" .. VOLUME_SUPERBUNDLE .. "': " .. (s_VolumeOk and "OK" or ("FAILED " .. tostring(s_VolumeErr))))
+			m_VolumeActive = s_VolumeOk
+		end
+
+		if FLASH_ENABLED then
+			local s_FlashOk, s_FlashErr = pcall(function() ResourceManager:MountSuperBundle(FLASH_SUPERBUNDLE) end)
+			LOG("mount '" .. FLASH_SUPERBUNDLE .. "': " .. (s_FlashOk and "OK" or ("FAILED " .. tostring(s_FlashErr))))
+			m_FlashActive = s_FlashOk
+			_G.TACTICALSLOTS_FLASH_MOUNTED = s_FlashOk
+		end
 	end
 
 	if SKIP_LEVELS[s_Leaf] then
@@ -144,6 +201,24 @@ Hooks:Install("ResourceManager:LoadBundles", 100, function(p_Hook, p_Bundles, p_
 		s_Ours[#s_Ours + 1] = SMOKE_BUNDLE
 	end
 
+	if m_VolumeActive then
+		for _, l_Bundle in ipairs(VOLUME_BUNDLES) do
+			s_Ours[#s_Ours + 1] = l_Bundle
+		end
+	end
+
+	if m_FlashActive then
+		s_Ours[#s_Ours + 1] = FLASH_BUNDLE
+	end
+
+	if m_M136Active then
+		s_Ours[#s_Ours + 1] = M136_BUNDLE
+	end
+
+	if m_M82A3Active then
+		s_Ours[#s_Ours + 1] = M82A3_BUNDLE
+	end
+
 	if #s_Ours == 0 then
 		return
 	end
@@ -157,7 +232,7 @@ Hooks:Install("ResourceManager:LoadBundles", 100, function(p_Hook, p_Bundles, p_
 	local s_At = nil
 
 	for i, l_Bundle in ipairs(p_Bundles) do
-		if l_Bundle == BUNDLE or l_Bundle == SMOKE_BUNDLE then
+		if l_Bundle == BUNDLE or l_Bundle == SMOKE_BUNDLE or l_Bundle == FLASH_BUNDLE or l_Bundle == M136_BUNDLE or l_Bundle == M82A3_BUNDLE then
 			return
 		end
 
@@ -234,7 +309,7 @@ end
 
 -- The deploy screen's mailbox: the Param its KnifeSelSet writes when the screen pulls it (the slot shows that knife).
 -- The screen's partition loads more than once per level and the screen may run any of the copies, so every copy is written
--- (measured 2026-10-14: writing only the last copy left the screen showing the knife of the level's start). Returns how many.
+-- (writing only the last copy leaves the screen showing the knife of the level's start). Returns how many.
 local function WriteMailbox(p_Why)
 	local s_Written = 0
 
@@ -469,8 +544,14 @@ Events:Subscribe("Level:Destroy", function()
 	_G.TACTICALSLOTS_GRENADE_NODES = {}
 end)
 
--- the M18 smoke grenade and the grenade slot's choice
+-- the M84 flashbang (made by the grenade slot's code, below), the M18 smoke grenade and the grenade slot's choice
+require('__shared/Flashbang')
 require('__shared/SmokeGrenade')
+
+-- the M136 AT4 in the engineer's gadget 1 list
+require('__shared/M136')
+-- the M82A3 in the recon's primary weapon list, with its accessories
+require('__shared/M82A3')
 
 -- the deploy screen's knife slot (the UI build merged into this mod)
 require('__shared/TacticalSlotsShared')
